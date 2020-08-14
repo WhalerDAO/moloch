@@ -22,6 +22,7 @@ const {
 } = require('./test-utils')
 
 const Moloch = artifacts.require('./Moloch')
+const MolochSummoner = artifacts.require('./MolochSummoner')
 const Token = artifacts.require('./Token')
 const Submitter = artifacts.require('./Submitter') // used to test submit proposal return values
 
@@ -133,7 +134,7 @@ async function moveForwardPeriods (periods) {
 }
 
 contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, delegateKey, nonMemberAccount, ...otherAccounts]) => {
-  let moloch, tokenAlpha, submitter
+  let moloch, tokenAlpha, submitter, molochTemplate, molochSummoner
   let proposal1, proposal2, depositToken
 
   const initSummonerBalance = 100
@@ -158,10 +159,54 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     await tokenAlpha.approve(moloch.address, value, { from: to })
   }
 
+  const newMoloch = async (
+    _summoner,
+    _tokenAddresses,
+    PERIOD_DURATION_IN_SECONDS,
+    VOTING_DURATON_IN_PERIODS,
+    GRACE_DURATON_IN_PERIODS,
+    PROPOSAL_DEPOSIT,
+    DILUTION_BOUND,
+    PROCESSING_REWARD
+  ) => {
+    let molochAddress = await molochSummoner.summonMoloch.call(
+      _summoner,
+      _tokenAddresses,
+      PERIOD_DURATION_IN_SECONDS,
+      VOTING_DURATON_IN_PERIODS,
+      GRACE_DURATON_IN_PERIODS,
+      PROPOSAL_DEPOSIT,
+      DILUTION_BOUND,
+      PROCESSING_REWARD
+    )
+    const receipt = (await molochSummoner.summonMoloch(
+      _summoner,
+      _tokenAddresses,
+      PERIOD_DURATION_IN_SECONDS,
+      VOTING_DURATON_IN_PERIODS,
+      GRACE_DURATON_IN_PERIODS,
+      PROPOSAL_DEPOSIT,
+      DILUTION_BOUND,
+      PROCESSING_REWARD
+    )).receipt
+    const _moloch = await Moloch.at(molochAddress)
+    return {
+      moloch: _moloch,
+      receipt: receipt
+    }
+  }
+
   before('deploy contracts', async () => {
     tokenAlpha = await Token.new(deploymentConfig.TOKEN_SUPPLY)
 
-    moloch = await Moloch.new(
+    // deploy moloch template
+    molochTemplate = await Moloch.new()
+
+    // deploy moloch summoner
+    molochSummoner = await MolochSummoner.new(molochTemplate.address)
+
+    // deploy moloch
+    moloch = (await newMoloch(
       summoner,
       [tokenAlpha.address],
       deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -170,7 +215,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       deploymentConfig.PROPOSAL_DEPOSIT,
       deploymentConfig.DILUTION_BOUND,
       deploymentConfig.PROCESSING_REWARD
-    )
+    )).moloch
 
     const depositTokenAddress = await moloch.depositToken()
     assert.equal(depositTokenAddress, tokenAlpha.address)
@@ -275,7 +320,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
 
       const depToken = await Token.new(deploymentConfig.TOKEN_SUPPLY)
 
-      const newContract = await Moloch.new(
+      const newContract = await newMoloch(
         summoner,
         [depToken.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -284,14 +329,14 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
         deploymentConfig.PROPOSAL_DEPOSIT,
         deploymentConfig.DILUTION_BOUND,
         deploymentConfig.PROCESSING_REWARD
-      ) 
-      const transactionHash = newContract.transactionHash;
+      )
+      const transactionHash = newContract.receipt.transactionHash;
     
       const transactionReceipt = await web3.eth.getTransactionReceipt(transactionHash);
      
       const blockNumber = transactionReceipt.blockNumber;
 
-      const logs = await newContract.getPastEvents("allEvents", {fromBlock: blockNumber, toBlock: blockNumber});
+      const logs = await newContract.moloch.getPastEvents("allEvents", {fromBlock: blockNumber, toBlock: blockNumber});
       
       const log = logs[0];
 

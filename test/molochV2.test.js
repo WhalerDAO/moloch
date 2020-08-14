@@ -22,6 +22,7 @@ const {
 } = require('./test-utils')
 
 const Moloch = artifacts.require('./Moloch')
+const MolochSummoner = artifacts.require('./MolochSummoner')
 const Token = artifacts.require('./Token')
 const Submitter = artifacts.require('./Submitter') // used to test submit proposal return values
 
@@ -146,7 +147,7 @@ function addressArray(length) {
 }
 
 contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, delegateKey, nonMemberAccount, ...otherAccounts]) => {
-  let moloch, tokenAlpha, submitter
+  let moloch, tokenAlpha, submitter, molochTemplate, molochSummoner
   let proposal1, proposal2, depositToken
 
   const initSummonerBalance = 100
@@ -171,10 +172,51 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     await tokenAlpha.approve(moloch.address, value, { from: to })
   }
 
+  const newMoloch = async (
+    _summoner,
+    _tokenAddresses,
+    PERIOD_DURATION_IN_SECONDS,
+    VOTING_DURATON_IN_PERIODS,
+    GRACE_DURATON_IN_PERIODS,
+    PROPOSAL_DEPOSIT,
+    DILUTION_BOUND,
+    PROCESSING_REWARD
+  ) => {
+    let molochAddress = await molochSummoner.summonMoloch.call(
+      _summoner,
+      _tokenAddresses,
+      PERIOD_DURATION_IN_SECONDS,
+      VOTING_DURATON_IN_PERIODS,
+      GRACE_DURATON_IN_PERIODS,
+      PROPOSAL_DEPOSIT,
+      DILUTION_BOUND,
+      PROCESSING_REWARD
+    )
+    await molochSummoner.summonMoloch(
+      _summoner,
+      _tokenAddresses,
+      PERIOD_DURATION_IN_SECONDS,
+      VOTING_DURATON_IN_PERIODS,
+      GRACE_DURATON_IN_PERIODS,
+      PROPOSAL_DEPOSIT,
+      DILUTION_BOUND,
+      PROCESSING_REWARD
+    )
+    const _moloch = await Moloch.at(molochAddress)
+    return _moloch
+  }
+
   before('deploy contracts', async () => {
     tokenAlpha = await Token.new(deploymentConfig.TOKEN_SUPPLY)
 
-    moloch = await Moloch.new(
+    // deploy moloch template
+    molochTemplate = await Moloch.new()
+
+    // deploy moloch summoner
+    molochSummoner = await MolochSummoner.new(molochTemplate.address)
+
+    // deploy moloch
+    moloch = await newMoloch(
       summoner,
       [tokenAlpha.address],
       deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -291,7 +333,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - summoner can not be zero address', async () => {
-      await Moloch.new(
+      await newMoloch(
         zeroAddress,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -304,7 +346,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - period duration can not be zero', async () => {
-      await Moloch.new(
+      await newMoloch(
         summoner,
         [tokenAlpha.address],
         0,
@@ -317,7 +359,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - voting period can not be zero', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -330,7 +372,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - voting period exceeds limit', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -342,7 +384,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       ).should.be.rejectedWith(revertMessages.molochConstructorVotingPeriodLengthExceedsLimit)
 
       // still works with 1 less
-      const molochTemp = await Moloch.new(
+      const molochTemp = await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -358,7 +400,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - grace period exceeds limit', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -370,7 +412,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       ).should.be.rejectedWith(revertMessages.molochConstructorGracePeriodLengthExceedsLimit)
 
       // still works with 1 less
-      const molochTemp = await Moloch.new(
+      const molochTemp = await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -386,7 +428,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - dilution bound can not be zero', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -399,7 +441,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - dilution bound exceeds limit', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -411,7 +453,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       ).should.be.rejectedWith(revertMessages.molochConstructorDilutionBoundExceedsLimitExceedsLimit)
 
       // still works with 1 less
-      const molochTemp = await Moloch.new(
+      const molochTemp = await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -427,7 +469,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - need at least one approved token', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -440,7 +482,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - too many tokens', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         addressArray(MAX_TOKEN_WHITELIST_COUNT + 1),
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -453,7 +495,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - deposit cannot be smaller than processing reward', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -466,7 +508,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - approved token cannot be zero', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [zeroAddress],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -479,7 +521,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('require fail - duplicate approved token', async () => {
-      await Moloch.new(
+      await newMoloch (
         summoner,
         [tokenAlpha.address, tokenAlpha.address],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,

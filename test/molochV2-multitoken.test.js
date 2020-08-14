@@ -20,6 +20,7 @@ chai
   .should()
 
 const Moloch = artifacts.require('./Moloch')
+const MolochSummoner = artifacts.require('./MolochSummoner')
 const Token = artifacts.require('./Token')
 
 const revertMessages = {
@@ -37,10 +38,10 @@ const revertMessages = {
 const SolRevert = 'VM Exception while processing transaction: revert'
 
 const zeroAddress = '0x0000000000000000000000000000000000000000'
-const GUILD  = '0x000000000000000000000000000000000000dead'
+const GUILD = '0x000000000000000000000000000000000000dead'
 const ESCROW = '0x000000000000000000000000000000000000beef'
 const MAX_TOKEN_WHITELIST_COUNT = new BN('10')
-const MAX_TOKEN_GUILDBANK_COUNT = new BN('5') 
+const MAX_TOKEN_GUILDBANK_COUNT = new BN('5')
 
 const _1 = new BN('1')
 const _1e18 = new BN('1000000000000000000') // 1e18
@@ -84,7 +85,7 @@ async function moveForwardPeriods (periods) {
   return true
 }
 
-function addressArray(length) {
+function addressArray (length) {
   // returns an array of distinct non-zero addresses
   let array = []
   for (let i = 1; i <= length; i++) {
@@ -94,7 +95,7 @@ function addressArray(length) {
 }
 
 contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, delegateKey, nonMemberAccount, ...otherAccounts]) => {
-  let moloch, tokenAlpha, tokenBeta, tokenGamma, tokenDelta, tokenEpsilon, tokenCount
+  let moloch, tokenAlpha, tokenBeta, tokenGamma, tokenDelta, tokenEpsilon, tokenCount, molochTemplate, molochSummoner
   let proposal1, proposal2, proposal3, depositToken
 
   const firstProposalIndex = 0
@@ -117,6 +118,40 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     await token.approve(moloch.address, value, { from: to })
   }
 
+  const newMoloch = async (
+    _summoner,
+    _tokenAddresses,
+    PERIOD_DURATION_IN_SECONDS,
+    VOTING_DURATON_IN_PERIODS,
+    GRACE_DURATON_IN_PERIODS,
+    PROPOSAL_DEPOSIT,
+    DILUTION_BOUND,
+    PROCESSING_REWARD
+  ) => {
+    let molochAddress = await molochSummoner.summonMoloch.call(
+      _summoner,
+      _tokenAddresses,
+      PERIOD_DURATION_IN_SECONDS,
+      VOTING_DURATON_IN_PERIODS,
+      GRACE_DURATON_IN_PERIODS,
+      PROPOSAL_DEPOSIT,
+      DILUTION_BOUND,
+      PROCESSING_REWARD
+    )
+    await molochSummoner.summonMoloch(
+      _summoner,
+      _tokenAddresses,
+      PERIOD_DURATION_IN_SECONDS,
+      VOTING_DURATON_IN_PERIODS,
+      GRACE_DURATON_IN_PERIODS,
+      PROPOSAL_DEPOSIT,
+      DILUTION_BOUND,
+      PROCESSING_REWARD
+    )
+    const _moloch = await Moloch.at(molochAddress)
+    return _moloch
+  }
+
   before('deploy contracts', async () => {
     tokenAlpha = await Token.new(deploymentConfig.TOKEN_SUPPLY, { from: creator })
     tokenBeta = await Token.new(deploymentConfig.TOKEN_SUPPLY, { from: creator })
@@ -124,7 +159,14 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     tokenDelta = await Token.new(deploymentConfig.TOKEN_SUPPLY, { from: creator })
     tokenEpsilon = await Token.new(deploymentConfig.TOKEN_SUPPLY, { from: creator })
 
-    moloch = await Moloch.new(
+    // deploy moloch template
+    molochTemplate = await Moloch.new()
+
+    // deploy moloch summoner
+    molochSummoner = await MolochSummoner.new(molochTemplate.address)
+
+    // deploy moloch
+    moloch = await newMoloch(
       summoner,
       [tokenAlpha.address, tokenBeta.address],
       deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -293,7 +335,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
 
     it('require fail - token to collect not whitelisted', async () => {
       // attempt to collect tokenGamma (not whitelisted))
-      
+
       await tokenGamma.transfer(moloch.address, 100, { from: creator })
 
       const molochTokenGammaBalance = +(await tokenGamma.balanceOf(moloch.address))
@@ -317,7 +359,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
 
     it('require fail - guild bank balance for token to collect is zero', async () => {
       // attempt to collect tokenBeta (whitelisted but no balance)
-      
+
       await tokenBeta.transfer(moloch.address, 100, { from: creator })
 
       const molochTokenBetaBalance = +(await tokenBeta.balanceOf(moloch.address))
@@ -839,7 +881,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     let token_whitelist_limit = 10
 
     it('deploy with maximum token count', async () => {
-      moloch = await Moloch.new(
+      moloch = await newMoloch(
         summoner,
         [tokenAlpha.address].concat(addressArray(token_whitelist_limit - 1)),
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -864,9 +906,11 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
   })
 
   describe('token count limit - add tokens during operation', async () => {
+    let token_whitelist_limit = 10
+
     beforeEach(async () => {
       // deploy with maximum - 1 tokens, so we can add 1 more
-      moloch = await Moloch.new(
+      moloch = await newMoloch(
         summoner,
         [tokenAlpha.address].concat(addressArray(token_whitelist_limit - 2)),
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -964,7 +1008,6 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       ).should.be.rejectedWith(revertMessages.sponsorProposalMaximumNumberOfTokensReached)
     })
 
-
     it('require fail - submit another whitelist proposal when maximum reached', async () => {
       await moloch.submitWhitelistProposal(
         tokenEpsilon.address,
@@ -986,7 +1029,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       proposal1.tributeOffered = 69
 
       // mint max guildbank tokens, in addition to tokenAlpha this should provide us 1 extra whitelisted token to test the boundary
-      for (let i=0; i < token_guildbank_limit; i++) {
+      for (let i = 0; i < token_guildbank_limit; i++) {
         let token = await Token.new(deploymentConfig.TOKEN_SUPPLY, { from: creator })
         tokens.push(token)
       }
@@ -994,7 +1037,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       tokenAddresses = tokens.map(t => t.address)
 
       // add tokens to whitelist in a new moloch constructor so we can skip proposals for it
-      moloch = await Moloch.new(
+      moloch = await newMoloch(
         summoner,
         tokenAddresses,
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -1017,7 +1060,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
 
       // add some tribute in each token EXCEPT the last TWO
       // this will leave us with 1 slot open and 1 extra so we can test submit/sponsor/process boundary conditions
-      for (let i=0; i < tokens.length - 2; i++) {
+      for (let i = 0; i < tokens.length - 2; i++) {
         let token = tokens[i]
 
         await fundAndApproveToMoloch({
@@ -1047,22 +1090,22 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
           expectedProposalCount: i + 1,
           expectedProposalQueueLength: i
         })
-  
+
         await moloch.sponsorProposal(i, { from: summoner })
         await moveForwardPeriods(1)
 
         await moloch.submitVote(i, yes, { from: summoner })
-  
+
         await moveForwardPeriods(deploymentConfig.VOTING_DURATON_IN_PERIODS)
         await moveForwardPeriods(deploymentConfig.GRACE_DURATON_IN_PERIODS)
-  
+
         await moloch.processProposal(i, { from: processor })
       }
     })
 
     it('submitting new tribute tokens after max is reached fails', async () => {
-      const initialProposalCount = +(await moloch.proposalCount());
-      const initialProposalQueueLength = +(await moloch.getProposalQueueLength());
+      const initialProposalCount = +(await moloch.proposalCount())
+      const initialProposalQueueLength = +(await moloch.getProposalQueueLength())
 
       const totalGuildBankTokens = await moloch.totalGuildBankTokens()
       assert(totalGuildBankTokens, token_guildbank_limit - 1)
@@ -1109,7 +1152,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
 
       const totalGuildBankTokensAfter = await moloch.totalGuildBankTokens()
       assert(totalGuildBankTokensAfter, token_guildbank_limit)
-      
+
       let extraToken = tokens[tokens.length - 1]
       await fundAndApproveToMoloch({
         token: extraToken,
@@ -1155,8 +1198,8 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
     })
 
     it('sponsoring a previously submitted tribute proposal fails after max guild bank tokens is reached', async () => {
-      const initialProposalCount = +(await moloch.proposalCount());
-      const initialProposalQueueLength = +(await moloch.getProposalQueueLength());
+      const initialProposalCount = +(await moloch.proposalCount())
+      const initialProposalQueueLength = +(await moloch.getProposalQueueLength())
 
       const totalGuildBankTokens = await moloch.totalGuildBankTokens()
       assert(totalGuildBankTokens, token_guildbank_limit - 1)
@@ -1172,7 +1215,6 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
         value: proposal1.tributeOffered
       })
 
-            
       await fundAndApproveToMoloch({
         token: token2,
         to: proposal1.applicant,
@@ -1234,14 +1276,14 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
 
       const totalGuildBankTokensAfter = await moloch.totalGuildBankTokens()
       assert(totalGuildBankTokensAfter, token_guildbank_limit)
-      
+
       await moloch.sponsorProposal(initialProposalCount + 1, { from: summoner })
         .should.be.rejectedWith(revertMessages.sponsorTributeProposalMaxGuildBankTokensReached)
     })
 
     it('processing a previously sponsored tribute proposal fails after max guild bank tokens is reached', async () => {
-      const initialProposalCount = +(await moloch.proposalCount());
-      const initialProposalQueueLength = +(await moloch.getProposalQueueLength());
+      const initialProposalCount = +(await moloch.proposalCount())
+      const initialProposalQueueLength = +(await moloch.getProposalQueueLength())
 
       const totalGuildBankTokens = await moloch.totalGuildBankTokens()
       assert(totalGuildBankTokens, token_guildbank_limit - 1)
@@ -1257,7 +1299,6 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
         value: proposal1.tributeOffered
       })
 
-            
       await fundAndApproveToMoloch({
         token: token2,
         to: proposal1.applicant,
@@ -1310,7 +1351,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       // sponsor and vote YES on both proposals
       await moloch.sponsorProposal(initialProposalCount, { from: summoner })
       await moveForwardPeriods(1)
-      
+
       await moloch.sponsorProposal(initialProposalCount + 1, { from: summoner })
       await moveForwardPeriods(1)
 
@@ -1336,11 +1377,11 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       })
     })
   })
-  
+
   describe('RAGEQUIT AND WITHDRAW TOKENS AT MAXIMUM TOKEN LIMITS', () => {
     let tokens, tokenAddresses, guildbank_tokens, guildbank_token_addresses
 
-    beforeEach(async function() {
+    beforeEach(async function () {
       this.timeout(1200000)
 
       // 1. create max tokens
@@ -1350,7 +1391,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       proposal1.tributeOffered = _1e18
 
       // mint max whitelist minus 1 (deposit token)
-      for (let i=0; i < MAX_TOKEN_WHITELIST_COUNT - 1; i++) {
+      for (let i = 0; i < MAX_TOKEN_WHITELIST_COUNT - 1; i++) {
         let token = await Token.new(deploymentConfig.TOKEN_SUPPLY, { from: creator })
         tokens.push(token)
       }
@@ -1360,7 +1401,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       guildbank_token_addresses = guildbank_tokens.map(t => t.address)
 
       // add tokens to whitelist in a new moloch constructor so we can skip proposals for it
-      moloch = await Moloch.new(
+      moloch = await newMoloch(
         summoner,
         [tokenAddresses[0]],
         deploymentConfig.PERIOD_DURATION_IN_SECONDS,
@@ -1379,7 +1420,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       })
 
       // whitelist all the tokens
-      for (let i=1; i < tokens.length; i++) { // start at i=1, skip deposit token
+      for (let i = 1; i < tokens.length; i++) { // start at i=1, skip deposit token
         let token = tokens[i]
 
         await moloch.submitWhitelistProposal(
@@ -1387,15 +1428,15 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
           'whitelist this token!',
           { from: proposal1.applicant }
         )
-  
+
         await moloch.sponsorProposal(i - 1, { from: summoner })
         await moveForwardPeriods(1)
 
         await moloch.submitVote(i - 1, yes, { from: summoner })
-  
+
         await moveForwardPeriods(deploymentConfig.VOTING_DURATON_IN_PERIODS)
         await moveForwardPeriods(deploymentConfig.GRACE_DURATON_IN_PERIODS)
-  
+
         await moloch.processWhitelistProposal(i - 1, { from: processor })
       }
 
@@ -1410,7 +1451,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       })
 
       // max out the tokens with a guild bank balance
-      for (let i=0; i < MAX_TOKEN_GUILDBANK_COUNT; i++) {
+      for (let i = 0; i < MAX_TOKEN_GUILDBANK_COUNT; i++) {
         let token = tokens[i]
 
         await fundAndApproveToMoloch({
@@ -1431,15 +1472,15 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
           proposal1.details,
           { from: proposal1.applicant }
         )
-  
+
         await moloch.sponsorProposal(i + tokenCount - 1, { from: summoner })
         await moveForwardPeriods(1)
 
         await moloch.submitVote(i + tokenCount - 1, yes, { from: summoner })
-  
+
         await moveForwardPeriods(deploymentConfig.VOTING_DURATON_IN_PERIODS)
         await moveForwardPeriods(deploymentConfig.GRACE_DURATON_IN_PERIODS)
-  
+
         await moloch.processProposal(i + tokenCount - 1, { from: processor })
 
         await verifyInternalBalances({
@@ -1454,7 +1495,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
       }
     })
 
-    it.only('can still ragequit and withdraw', async function() {
+    it('can still ragequit and withdraw', async function () {
       this.timeout(1200000)
 
       const memberData = await moloch.members(proposal1.applicant)
@@ -1484,7 +1525,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
         }
       })
 
-      for (let i=1; i < guildbank_tokens.length; i++) {
+      for (let i = 1; i < guildbank_tokens.length; i++) {
         await verifyInternalBalances({
           moloch,
           token: guildbank_tokens[i],
@@ -1495,7 +1536,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
           }
         })
       }
-      
+
       let zeroesArray = guildbank_tokens.map(a => 0)
       await moloch.withdrawBalances(guildbank_token_addresses, zeroesArray, true, { from: proposal1.applicant })
 
@@ -1511,7 +1552,7 @@ contract('Moloch', ([creator, summoner, applicant1, applicant2, processor, deleg
         }
       })
 
-      for (let i=0; i < guildbank_tokens.length - 1; i++) {
+      for (let i = 0; i < guildbank_tokens.length - 1; i++) {
         await verifyInternalBalances({
           moloch,
           token: guildbank_tokens[i],

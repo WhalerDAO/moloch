@@ -18,7 +18,7 @@ pragma solidity ^0.5.0;
 contract ReentrancyGuard {
     bool private _notEntered;
 
-    constructor () internal {
+    function _initReentrancyGuard () internal {
         // Storing an initial non-zero value makes deployment a bit more
         // expensive, but in exchange the refund on every call to nonReentrant
         // will be lower in amount. Since refunds are capped to a percetange of
